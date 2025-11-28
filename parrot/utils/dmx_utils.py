@@ -35,42 +35,36 @@ usb_path = "/dev/cu.usbserial-EN419206"
 
 @beartype
 def find_entec_port():
-    """Find the Entec DMX controller port automatically"""
-    # First, try the hardcoded path if it exists
+    import os
+    import glob
+    import serial.tools.list_ports
+    import sys
+
+    # First, try the hardcoded path
     if os.path.exists(usb_path):
         print(f"Found Entec port at hardcoded path: {usb_path}")
         return usb_path
 
-    # Try the tty variant (macOS sometimes needs this)
-    tty_path = usb_path.replace("/dev/cu.", "/dev/tty.")
-    if os.path.exists(tty_path):
-        print(f"Found Entec port at tty variant: {tty_path}")
-        return tty_path
+    # macOS-specific tty fallback
+    if sys.platform == "darwin":
+        tty_path = usb_path.replace("/dev/cu.", "/dev/tty.")
+        if os.path.exists(tty_path):
+            print(f"Found Entec port at tty variant: {tty_path}")
+            return tty_path
 
-    # Scan for Entec devices using pyserial
     ports = serial.tools.list_ports.comports()
     print(f"Scanning {len(ports)} serial ports for Entec DMX controller...")
+
     for port in ports:
         desc = str(port.description).lower()
         hwid = str(port.hwid).lower()
         manufacturer = str(getattr(port, "manufacturer", "")).lower()
         product = str(getattr(port, "product", "")).lower()
 
-        # Check for FTDI VID:PID (0403:6001 is common FTDI chip)
-        # Entec DMX USB PRO uses FTDI chip with VID 0403, PID 6001
         if "0403" in hwid and "6001" in hwid:
-            print(
-                f"Found FTDI device (likely Entec) at {port.device} (VID:PID=0403:6001)"
-            )
-            if port.device.startswith("/dev/cu."):
-                return port.device
-            elif port.device.startswith("/dev/tty."):
-                cu_path = port.device.replace("/dev/tty.", "/dev/cu.")
-                if os.path.exists(cu_path):
-                    return cu_path
-                return port.device
+            print(f"✅ Found FTDI device at {port.device}")
+            return port.device
 
-        # Look for Entec/FTDI DMX devices - check multiple fields
         if any(
             keyword in desc
             or keyword in hwid
@@ -78,45 +72,31 @@ def find_entec_port():
             or keyword in product
             for keyword in ["enttec", "entec", "dmx", "ftdi"]
         ):
-            print(
-                f"Found potential Entec device at {port.device} (desc={port.description}, hwid={port.hwid})"
-            )
-            # Prefer cu.* over tty.* on macOS for writing
-            if port.device.startswith("/dev/cu."):
-                return port.device
-            elif port.device.startswith("/dev/tty."):
-                # Try the cu.* variant
-                cu_path = port.device.replace("/dev/tty.", "/dev/cu.")
-                if os.path.exists(cu_path):
-                    return cu_path
-                return port.device
+            print(f"✅ Found potential Entec device at {port.device}")
+            return port.device
 
-    # Also check for USB serial devices by scanning /dev directly
-    # Look for devices matching common patterns
-    import glob
+    # OS-specific /dev scanning
+    if sys.platform == "darwin":
+        scan_patterns = [
+            "/dev/cu.usbserial*",
+            "/dev/cu.usbmodem*",
+            "/dev/tty.usbserial*",
+            "/dev/tty.usbmodem*",
+        ]
+    else:  # Linux + others
+        scan_patterns = [
+            "/dev/ttyUSB*",
+            "/dev/ttyACM*",
+        ]
 
-    usb_patterns = [
-        "/dev/cu.usbserial*",
-        "/dev/cu.usbmodem*",
-        "/dev/tty.usbserial*",
-        "/dev/tty.usbmodem*",
-    ]
-
-    print("Scanning /dev for USB serial devices...")
-    for pattern in usb_patterns:
+    print(f"Scanning /dev using patterns: {scan_patterns}")
+    for pattern in scan_patterns:
         for path in glob.glob(pattern):
-            # Skip known non-DMX devices
-            if any(skip in path.lower() for skip in ["bluetooth", "debug"]):
-                continue
-            # Check if it might be our device by checking if it's accessible
             if os.path.exists(path):
-                print(f"Found USB serial device at {path}, attempting to verify...")
-                # Try to verify it's an FTDI device by checking VID/PID via system_profiler
-                # For now, return the first USB serial device found
-                # (The Controller class will handle if it's wrong)
+                print(f"✅ Found device at {path}")
                 return path
 
-    print("No Entec DMX controller port found")
+    print("❌ No Entec DMX controller port found")
     return None
 
 
