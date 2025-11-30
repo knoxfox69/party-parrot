@@ -2,8 +2,6 @@ from DMXEnttecPro import Controller
 import math
 import os
 import enum
-import serial.tools.list_ports
-from serial.serialutil import SerialException
 
 from beartype import beartype
 from parrot.utils.mock_controller import MockDmxController
@@ -14,8 +12,7 @@ from stupidArtnet import StupidArtnet
 class Universe(enum.Enum):
     """DMX Universe enumeration"""
 
-    default = "default"  # Maps to Entec controller
-    art1 = "art1"  # Maps to Art-Net controller
+    default = "art1"  # Maps to Entec controller
 
 
 @beartype
@@ -116,84 +113,25 @@ class ArtNetController:
     def submit(self):
         self.artnet.set(self.dmx_data)
         self.artnet.show()
-
+        print(f"Setting channel {self.dmx_data}")
 
 class SwitchController:
-    """Routes DMX commands to the appropriate controller based on universe"""
-
     def __init__(self, controller_map):
-        """
-        Initialize with a mapping of Universe -> controller
-
-        Args:
-            controller_map: Dict mapping Universe enum values to controller instances
-        """
         self.controller_map = controller_map
-        # Track which universes use Entec controllers for reconnection
-        self._entec_universes = set()
-
-    def _mark_entec_universe(self, universe):
-        """Mark a universe as using an Entec controller"""
-        self._entec_universes.add(universe)
 
     def set_channel(self, channel, value, universe=Universe.default):
-        """Set a channel value on the specified universe"""
         controller = self.controller_map.get(universe)
         if controller:
             controller.set_channel(channel, value)
 
-    def _reconnect_entec(self, universe):
-        """Attempt to reconnect the Entec controller for a universe"""
-        if universe not in self._entec_universes:
-            return False
-
-        print(
-            f"🔄 Attempting to reconnect Entec DMX controller for universe {universe.value}..."
-        )
-        try:
-            new_controller = get_entec_controller()
-            if isinstance(new_controller, Controller):
-                self.controller_map[universe] = new_controller
-                print(
-                    f"✅ Successfully reconnected Entec DMX controller for universe {universe.value}"
-                )
-                return True
-            else:
-                print(
-                    f"⚠️  Entec controller not available, using mock controller for universe {universe.value}"
-                )
-                self.controller_map[universe] = new_controller
-                # Remove from Entec universes since we're using mock now
-                self._entec_universes.discard(universe)
-                return False
-        except Exception as e:
-            print(f"❌ Failed to reconnect Entec DMX controller: {e}")
-            print(f"   Using mock controller for universe {universe.value}")
-            self.controller_map[universe] = MockDmxController()
-            # Remove from Entec universes since we're using mock now
-            self._entec_universes.discard(universe)
-            return False
-
     def submit(self):
-        """Submit all controllers"""
-        for universe, controller in self.controller_map.items():
-            try:
-                controller.submit()
-            except (SerialException, OSError) as e:
-                # Device may have disconnected - print error and attempt reconnect
-                print(f"⚠️  DMX controller crash for universe {universe.value}: {e}")
-                # Only attempt reconnection for Entec controllers
-                if universe in self._entec_universes:
-                    print(f"   Attempting to reconnect...")
-                    self._reconnect_entec(universe)
-                else:
-                    print(f"   Skipping reconnection (not an Entec controller)")
-
+        for controller in self.controller_map.values():
+            controller.submit()
 
 # Per-venue Art-Net configuration
 # Format: {venue: {"ip": "x.x.x.x", "universe": 0}}
 artnet_config = {
-    "mtn_lotus": {"ip": "192.168.100.113", "universe": 0},
+    "two_heads_only": {"ip": "127.0.0.1", "universe": 0},
 }
 
 
@@ -242,30 +180,25 @@ def get_entec_controller():
 
 
 @beartype
+@beartype
 def get_controller(venue=None):
-    """Get DMX controller with universe routing based on venue"""
     controller_map = {}
     switch_controller = SwitchController(controller_map)
 
-    # Always add primary DMX controller (Entec or mock) as default universe
-    entec = get_entec_controller()
-    controller_map[Universe.default] = entec
-
-    # Mark as Entec universe if it's a real Controller (not MockDmxController)
-    if isinstance(entec, Controller):
-        switch_controller._mark_entec_universe(Universe.default)
-
-    # Add Art-Net if configured for this venue
+    # Always create Art-Net as the default universe
     if venue is not None:
         venue_name = venue.name if hasattr(venue, "name") else str(venue)
         config = artnet_config.get(venue_name)
-
         if config:
-            print(
-                f"Art-Net enabled for {venue_name}: {config['ip']} Universe {config['universe']}"
-            )
+            print(f"Art-Net enabled for {venue_name}: {config['ip']} Universe {config['universe']}")
             artnet = ArtNetController(config["ip"], config["universe"])
-            controller_map[Universe.art1] = artnet
+        else:
+            print(f"No Art-Net config for venue {venue_name}, using localhost Art-Net")
+            artnet = ArtNetController("127.0.0.1", 0)
+    else:
+        artnet = ArtNetController("127.0.0.1", 0)
 
-    # Always return SwitchController
+    controller_map[Universe.default] = artnet
+
     return switch_controller
+
