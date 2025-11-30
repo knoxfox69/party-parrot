@@ -79,6 +79,7 @@ class FixtureBase:
             dmx.set_channel(
                 self.address + i, dmx_clamp(self.values[i]), universe=self.universe
             )
+            dmx.submit()
 
     def __str__(self) -> str:
         return f"{self.name} @ {self.address}"

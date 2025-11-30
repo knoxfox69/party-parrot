@@ -28,8 +28,10 @@ pyopengl-accelerate = "^3.1.10"
 pyopengl = "^3.1.10"
 pillow = "^11.3.0"
 imgui = {extras = ["pyglet"], version = "^2.0.0"}
-pyobjc-framework-cocoa = "^11.1"
+pyobjc-framework-cocoa = { version = "^11.1", markers = "sys_platform == 'darwin'" }
 stupidartnet = "^1.4.0"
+setuptools = "^80.0.0"
+packaging = "^25.0"
 
 
 [tool.poetry.group.dev.dependencies]
